@@ -2,30 +2,16 @@
 -module(class_Person).
 
 % Determines what are the mother classes of this class (if any):
--define( wooper_superclasses, [ class_Actor ] ).
+-define( superclasses, [ class_Actor ] ).
 
 % parameters taken by the constructor ('construct').
 -define( wooper_construct_parameters, ActorSettings, CarName , ListTripsFinal , StartTime , Type , Mode, TrafficModel ).
-
-% Declaring all variations of WOOPER-defined standard life-cycle operations:
-% (template pasted, just two replacements performed to update arities)
--define( wooper_construct_export, new/7, new_link/7,
-		 synchronous_new/7, synchronous_new_link/7,
-		 synchronous_timed_new/7, synchronous_timed_new_link/7,
-		 remote_new/8, remote_new_link/8, remote_synchronous_new/8,
-		 remote_synchronous_new_link/8, remote_synchronisable_new_link/8,
-		 remote_synchronous_timed_new/8, remote_synchronous_timed_new_link/8,
-		 construct/8, destruct/1 ).
-
-% Method declarations.
--define( wooper_method_export, actSpontaneous/1, onFirstDiasca/2, metro_go/3 , bus_go/3 ).
-
 
 % Allows to define WOOPER base variables and methods for that class:
 -include("smart_city_test_types.hrl").
 
 % Allows to define WOOPER base variables and methods for that class:
--include("wooper.hrl").
+-include("sim_diasca_for_actors.hrl").
 
 % Creates a new agent that is a person that moves around the city
 -spec construct( wooper:state(), class_Actor:actor_settings(),
@@ -59,15 +45,15 @@ actSpontaneous( State ) ->
 	
 	case length( Trips ) > 0 of
 
-		false ->		
-			
+		false ->
+
 			Path = getAttribute( State , path ), 
 
 			case Path of 
 
 				finish -> 
 					
-					executeOneway( State , declareTermination );
+					wooper:return_state( executeOneway( State , declareTermination ) );
 
 				_ ->
 
@@ -89,7 +75,7 @@ actSpontaneous( State ) ->
 
 					print:write_final_message( Type , TotalLength , StartTime , CarId , CurrentTickOffset , LastPosition , Mode , csv ),
 
-					executeOneway( NewState, scheduleNextSpontaneousTick )
+					wooper:return_state( executeOneway( NewState, scheduleNextSpontaneousTick ) )
 
 				end;
 
@@ -105,7 +91,7 @@ actSpontaneous( State ) ->
 				"walk" ->
 	
 					NewState = request_position( State , CurrentTrip  ),
-					?wooper_return_state_only( NewState );
+					wooper:return_state( NewState );
 
 				"bus" ->
 
@@ -121,14 +107,14 @@ actSpontaneous( State ) ->
 
 							NewState = setAttributes( State , [ {trips , NewTrips } , {  pt_status , start } ] ),					
 
-							executeOneway( NewState , scheduleNextSpontaneousTick );
+							wooper:return_state( executeOneway( NewState , scheduleNextSpontaneousTick ) );
 
 						start ->								
 							
 							{ _ , Origin , Destination , Line , _ , _ } = CurrentTrip,
 							ets:insert(waiting_bus, { list_to_atom( Origin ) , Line , Destination , self() } ),
 
-							?wooper_return_state_only( State )
+							wooper:const_return()
 
 					end;
 
@@ -145,13 +131,13 @@ actSpontaneous( State ) ->
 							NewTrips = list_utils:remove_element_at( Trips , 1 ),
 
 							NewState = setAttributes( State , [ {trips , NewTrips } , {  pt_status , start } ] ),					
-							executeOneway( NewState , scheduleNextSpontaneousTick );
+							wooper:return_state( executeOneway( NewState , scheduleNextSpontaneousTick ) );
 
 						start ->
 	
 							NewState = request_position_metro( State , CurrentTrip ),
 
-							?wooper_return_state_only( NewState )
+							wooper:return_state( NewState )
 
 					end
 
@@ -167,50 +153,6 @@ request_position_metro( State , Trip ) ->
 
 	class_Actor:send_actor_message( ets:lookup_element(options, metro_pid, 2 ) ,
 		{ getTravelTime, { Origin , Destination } }, State ).
-
--spec metro_go( wooper:state(), value(), pid() ) -> class_Actor:actor_oneway_return().
-metro_go( State, PositionTime , _GraphPID ) ->
-
-	CurrentTickOffset = class_Actor:get_current_tick_offset( State ), 
-
-	TotalTime = CurrentTickOffset + element( 1 , PositionTime ), % CurrentTime + Time to pass the link
-
-	Trips = getAttribute( State , trips ), 
-	
-	Trip = list_utils:get_element_at( Trips , 1 ),
-
-	Destination = element( 5 , Trip ), 
-
-	PositionState = setAttributes( State , [ { car_position, list_to_atom( Destination ) } , { pt_status , finish } ] ),
-
-	CarId = getAttribute( PositionState , car_name ),
-  	Type = getAttribute( PositionState , type ),
-	print:write_movement_bus_metro_message( CurrentTickOffset , 0 , CarId , Type , Destination , metro , csv ),
-
-	executeOneway( PositionState , addSpontaneousTick, TotalTime ).
-
--spec bus_go( wooper:state(), value(), pid() ) -> class_Actor:actor_oneway_return().
-bus_go( State, _PositionTime , _GraphPID ) ->
-
-	% get the current time of the simulation
-	CurrentTickOffset = class_Actor:get_current_tick_offset( State ), 
-
-	Trips = getAttribute( State , trips ), 
-	
-	Trip = list_utils:get_element_at( Trips , 1 ),
-
-	Destination = element( 6 , Trip ), 
-
-	PositionState = setAttributes( State , [ { car_position, list_to_atom( Destination ) } , { pt_status , finish } ] ),
-
-	CarId = getAttribute( PositionState , car_name ),
-  	Type = getAttribute( PositionState , type ),
-
-	print:write_movement_bus_metro_message( CurrentTickOffset , 0 , CarId , Type , Destination , bus , csv ),
-
-	executeOneway( PositionState , addSpontaneousTick, CurrentTickOffset + 1 ).
-
-
 
 -spec request_position( wooper:state() , parameter() ) -> wooper:state().
 request_position( State , Trip ) ->
@@ -338,4 +280,4 @@ onFirstDiasca( State, _SendingActorPid ) ->
 	StartTime = getAttribute( State , start_time ),
     	FirstActionTime = class_Actor:get_current_tick_offset( State ) + StartTime,   	
 	NewState = setAttribute( State , start_time , FirstActionTime ),
-	executeOneway( NewState , addSpontaneousTick , FirstActionTime ).
+	wooper:return_state( executeOneway( NewState , addSpontaneousTick , FirstActionTime ) ).

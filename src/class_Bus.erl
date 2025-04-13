@@ -2,30 +2,16 @@
 -module(class_Bus).
 
 % Determines what are the mother classes of this class (if any):
--define( wooper_superclasses, [ class_Actor ] ).
+-define( superclasses, [ class_Actor ] ).
 
 % parameters taken by the constructor ('construct').
 -define( wooper_construct_parameters, ActorSettings, BusName, Path , StartTime , Interval , Stops ).
-
-% Declaring all variations of WOOPER-defined standard life-cycle operations:
-% (template pasted, just two replacements performed to update arities)
--define( wooper_construct_export, new/6, new_link/6,
-		 synchronous_new/6, synchronous_new_link/6,
-		 synchronous_timed_new/6, synchronous_timed_new_link/6,
-		 remote_new/7, remote_new_link/7, remote_synchronous_new/7,
-		 remote_synchronous_new_link/7, remote_synchronisable_new_link/7,
-		 remote_synchronous_timed_new/7, remote_synchronous_timed_new_link/7,
-		 construct/7, destruct/1 ).
-
-% Method declarations.
--define( wooper_method_export, actSpontaneous/1, onFirstDiasca/2, go/3 , continue/4).
-
 
 % Allows to define WOOPER base variables and methods for that class:
 -include("smart_city_test_types.hrl").
 
 % Allows to define WOOPER base variables and methods for that class:
--include("wooper.hrl").
+-include("sim_diasca_for_actors.hrl").
 
 % Creates a new agent that is a person that moves around the city
 -spec construct( wooper:state(), class_Actor:actor_settings(),
@@ -108,7 +94,7 @@ actSpontaneous( State ) ->
 
 			FinalState = request_position( NewDictState , Bus ),
 
-			executeOneway( FinalState , addSpontaneousTick, CurrentTickOffset + NewInterval );	
+			executeOneway( FinalState , addSpontaneousTick, CurrentTickOffset + NewInterval );
 
 		_ ->
 
@@ -130,12 +116,12 @@ actSpontaneous( State ) ->
 			
 			DictState = setAttribute( BusState , buses_time , NewBuses ),
 
-			request_position_buses( DictState , CurrentBuses );
+			wooper:return_state( request_position_buses( DictState , CurrentBuses ) );
 
 
 		false ->
 
-			BusState % Nothing to do
+			wooper:return_state( BusState ) % Nothing to do
 
 	end.
 
@@ -220,7 +206,7 @@ move( State , Path , Position , IdBus , InitialVertice , Bus , CurrentTickOffset
 				ok ->
 					State;
 				_ ->
-					ets:update_counter( list_streets, DecrementVertex , { 6 , -3 }),
+					ets:update_counter( list_streets, DecrementVertex , { 6 , -3*5 }),
 					State
 			end,
 
@@ -232,7 +218,7 @@ move( State , Path , Position , IdBus , InitialVertice , Bus , CurrentTickOffset
 
 			FinalBusState = setAttribute( FinalState , buses , NewDictBuses ),
 
-			ets:update_counter( list_streets , Vertices , { 6 , 3 }),
+			ets:update_counter( list_streets , Vertices , { 6 , 3*5 }),
 			Data = lists:nth( 1, ets:lookup( list_streets , Vertices ) ),
 
 			StreetData = traffic_models:get_speed_car(Data, car_following),
@@ -251,7 +237,7 @@ move( State , Path , Position , IdBus , InitialVertice , Bus , CurrentTickOffset
 				ok ->
 					State;
 				_ ->
-					ets:update_counter( list_streets, DecrementVertex , { 6 , -3 }),
+					ets:update_counter( list_streets, DecrementVertex , { 6 , -3*5 }),
 					State
 			end
 
@@ -411,15 +397,11 @@ onFirstDiasca( State, _SendingActorPid ) ->
 	
 		false ->
 
-			executeOneway( State , declareTermination );
+			wooper:return_state( executeOneway( State , declareTermination ) );
 
 		_ ->
-
-			
-    			FirstActionTime = class_Actor:get_current_tick_offset( State ) + getAttribute( State, start_time ),   	
-
+			FirstActionTime = class_Actor:get_current_tick_offset( State ) + getAttribute( State, start_time ),   	
 			ScheduledState = executeOneway( State , addSpontaneousTick, FirstActionTime ),
-
-			?wooper_return_state_only( ScheduledState )
+			wooper:return_state( ScheduledState )
 	
 	end.

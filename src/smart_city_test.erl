@@ -6,7 +6,7 @@
 -include("test_constructs.hrl").	
 
 -spec run() -> no_return().
-run() ->	
+run() ->
 
 	?test_start,
 	
@@ -16,7 +16,6 @@ run() ->
 		tick_duration = 1,
 		result_specification = no_output
 	},
-
 
 	DeploymentSettings = #deployment_settings{
 		computing_hosts = localhost_only,
@@ -33,11 +32,11 @@ run() ->
 
 	ConfigPath = os:getenv( "CONFIG_PATH" ),
 	
-	io:format("Path: ~s", [ ConfigPath ] ),
+	io:format("Path: ~s~n", [ ConfigPath ] ),
 
 	Config = config_parser:show( ConfigPath ),
 
-	io:format("Trips: ~s", [ element( 4 , Config ) ] ),
+	io:format("Trips: ~s~n", [ element( 4 , Config ) ] ),
 
 	ListCars = trip_parser:show( element( 4 , Config ) ), % Read the cars from the trips.xml file
 
@@ -71,29 +70,22 @@ run() ->
 	class_Actor:create_initial_actor( class_DigitalRails,  [ DigitalRails ] ),
 
 	case element( 8 , Config ) of % verify if it is necessary to generate the city graph actor 
-		"true" ->
-			 class_Actor:create_initial_actor( class_City, [ "City" , { string:concat( OutputPath, element( 3 , Config ) ) } ] );
-		_ ->
-			ok
+		"true" -> class_Actor:create_initial_actor( class_City, [ "City" , { string:concat( OutputPath, element( 3 , Config ) ) } ] );
+		_ -> ok
 	end,
 
 	case ParkSpots of
-	    ok ->
-		ok;
-	    _ ->		
-		class_Actor:create_initial_actor( class_Parking , [ "Parking" , ParkSpots ] )
+	    ok -> ok;
+	    _ -> class_Actor:create_initial_actor( class_Parking , [ "Parking" , ParkSpots ] )
 	end,
 
 	Names = [ "car1" , "car2" , "car3" , "car4" , "car5" , "car6" , "car7" , "car8" ],
 
 	List = create_scenario:split_list( Names , length ( Names ) , ListCars , []  ),   
 
-	create_scenario:spaw_proccess( List , CityGraph , DigitalRails ),
- 
+	create_scenario:spaw_proccess( List , CityGraph , DigitalRails ), 
 	create_scenario:collectResults( Names ),
-
 	create_scenario:create_buses( ListBuses , CityGraph ),
-
 	create_scenario:create_traffic_signals( TrafficSignals ),
 
 	SimulationDuration = element( 1 , string:to_integer(element( 2 , Config ) ) ),

@@ -1,29 +1,16 @@
 %Class that represents a person that can moves around the city graph on foot or by car
 -module(class_Car).
 
--define( wooper_superclasses, [ class_Actor ] ).
+-define( superclasses, [ class_Actor ] ).
 
 % parameters taken by the constructor ('construct').
 -define( wooper_construct_parameters, ActorSettings, CarName , ListTripsFinal , StartTime , Type , Park , Mode, DigitalRailsCapable ).
-
-% Declaring all variations of WOOPER-defined standard life-cycle operations:
-% (template pasted, just two replacements performed to update arities)
--define( wooper_construct_export, new/8, new_link/8,
-		 synchronous_new/8, synchronous_new_link/8,
-		 synchronous_timed_new/8, synchronous_timed_new_link/8,
-		 remote_new/9, remote_new_link/9, remote_synchronous_new/9,
-		 remote_synchronous_new_link/9, remote_synchronisable_new_link/9,
-		 remote_synchronous_timed_new/9, remote_synchronous_timed_new_link/9,
-		 construct/9, destruct/1 ).
-
-% Method declarations.
--define( wooper_method_export, actSpontaneous/1, onFirstDiasca/2, get_parking_spot/3 , set_new_path/3, receive_signal_state/3 ).
 
 % Allows to define WOOPER base variables and methods for that class:
 -include("smart_city_test_types.hrl").
 
 % Allows to define WOOPER base variables and methods for that class:
--include("wooper.hrl").
+-include("sim_diasca_for_actors.hrl").
 
 % Creates a new agent that is a person that moves around the city
 -spec construct( wooper:state(), class_Actor:actor_settings(),
@@ -47,7 +34,9 @@ construct( State, ?wooper_construct_parameters ) ->
 		{ last_vertex , ok },
 		{ last_vertex_pid , ok },
 		{ previous_dr_name, nil },
-		{ digital_rails_capable, DigitalRailsCapable}] 
+		{ in_platoon, false },
+		{ digital_rails_capable, DigitalRailsCapable},
+		{ occupation, 5 }] % one car occupies the space of 5 bikes 
 	),
 
 	case Park of
@@ -65,7 +54,7 @@ destruct( State ) ->
 actSpontaneous( State ) ->	
 	Trips = getAttribute( State , trips ), 
 	Path = getAttribute( State , path ), 
-	verify_next_action( State , Trips , Path ).
+	wooper:return_state( verify_next_action( State , Trips , Path ) ).
 
 verify_next_action( State , _Trip , Path ) when Path == false ->
 	executeOneway( State , declareTermination );
@@ -75,7 +64,7 @@ verify_next_action( State , Trips , Path ) when length( Trips ) == 0, Path == fi
 
 verify_next_action( State , Trips , Path ) when length( Trips ) > 0 ->
 	CurrentTrip = lists:nth( 1 , Trips ),		
-	?wooper_return_state_only( request_position( State , CurrentTrip , Path ) );
+	request_position( State , CurrentTrip , Path );
 
 verify_next_action( State , _Trips , _Path ) ->
 	Type = getAttribute( State , type ),						
@@ -104,7 +93,6 @@ request_position( State , _Trip , Path ) when Path == finish ->
 		false -> 
 			setAttributes( State , [ { trips , NewTrips } , { path, ok} ] )
 	end,
-
 	executeOneway( NewState , addSpontaneousTick , CurrentTickOffset + 1 );	
 
 
@@ -120,8 +108,9 @@ verify_park( State , Mode ) when Mode == walk ->
 
 
 verify_park( State , _Mode ) ->						
+	CarOccupation = getAttribute( State , occupation ),	
 	DecrementVertex = getAttribute( State , last_vertex_pid ),	
-	ets:update_counter( list_streets , DecrementVertex , { 6 , -1 }),
+	ets:update_counter( list_streets , DecrementVertex , { 6 , -CarOccupation }),
 	ParkStatus = getAttribute( State , park_status ),
 
 	case ParkStatus of
@@ -178,7 +167,7 @@ get_next_vertex( State, [ _CurrentVertex | _ ], _Mode) ->
 	Edge = list_to_atom(lists:concat([CurrentVertex, NextVertex])),
 
 	LinkData = lists:nth(1, ets:lookup(list_streets, Edge)),
-	{_, _, _, _, _, _, _Lanes, DigitalRailsInfo} = LinkData,
+	{_, _, _, _, _, _, _Lanes, DigitalRailsInfo, _, _, _, _} = LinkData,
 
 	_ChangingDR = is_changing_dr(State, DigitalRailsInfo),
 %	case ChangingDR of 
@@ -212,31 +201,71 @@ get_next_vertex( State, [ _CurrentVertex | _ ], _Mode) ->
 move_to_next_vertex( State ) ->
 	[ CurrentVertex | [ NextVertex | Path ] ] = getAttribute( State , path ),
 	Edge = list_to_atom(lists:concat([ CurrentVertex , NextVertex ])),
-	
-	Data = case getAttribute(State, digital_rails_capable) of
-		true -> 
-			DecrementVertex = getAttribute( State , last_vertex_pid ),
-			case DecrementVertex of
-				ok -> ok;
-				_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -1 })
-			end,	
-			ets:update_counter( list_streets_dr , Edge , { 6 , 1 }),
-			lists:nth(1, ets:lookup(list_streets_dr , Edge));
 
-		_ -> 
-			DecrementVertex = getAttribute( State , last_vertex_pid ),
+	DecrementVertex = getAttribute( State , last_vertex_pid ),
+	Mode = getAttribute( State , mode ), 
+	case Mode of
+		platoon -> 
+	%		io:format( "platoon" ),
+			ets:update_counter(drs_streets, Edge , { 2 , 1 } ),
 			case DecrementVertex of
 				ok -> ok;
-				_ -> ets:update_counter( list_streets, DecrementVertex , { 6 , -1 })
-			end,	
-			ets:update_counter( list_streets , Edge , { 6 , 1 }),
-			lists:nth(1, ets:lookup(list_streets , Edge))
+				_ -> ets:update_counter( drs_streets, DecrementVertex , { 2 , -1 } )
+			end;
+	 	_ -> ok
 	end,
-	
-	{ Id , Time , Distance } = traffic_models:get_speed_car(Data, getAttribute(State, digital_rails_capable)),
 
-	TotalLength = getAttribute( State , distance ) + Distance,
-	StateAfterMovement = setAttributes( State , [
+	CarOccupation = getAttribute( State , occupation ),
+		
+	{ Data, NewState } = case getAttribute(State, digital_rails_capable) of
+		true ->  
+			NewNewNewState = case Mode of
+				platoon -> 
+					case DecrementVertex of
+						ok -> ok;
+						_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -CarOccupation })
+					end,	
+					ets:update_counter( list_streets_dr , Edge , { 6 , CarOccupation }),
+					State;
+				car ->
+					IsPlatoon = getAttribute( State, in_platoon ),
+					NewNewState = case IsPlatoon of
+						true ->	
+							State;				
+						false -> 
+							case DecrementVertex of
+								ok -> ok;
+								_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -CarOccupation })
+							end,	
+							StreetDR = ets:lookup( drs_streets, Edge ),
+							HasDR = lists:nth(1, StreetDR),
+							StatePlatoon = case element( 2 , HasDR ) > 0 of
+								true -> 
+									setAttribute( State , in_platoon , true );
+								false -> 
+									ets:update_counter( list_streets_dr , Edge , { 6 , CarOccupation }),
+									State
+							end,
+							StatePlatoon
+					end,	
+					NewNewState
+			end,
+			DataReturn = lists:nth(1, ets:lookup(list_streets_dr , Edge)),
+			{ DataReturn , NewNewNewState };
+		_ -> 
+			case DecrementVertex of
+				ok -> ok;
+				_ -> ets:update_counter( list_streets, DecrementVertex , { 6 , -CarOccupation })
+			end,	
+			ets:update_counter( list_streets , Edge , { 6 , CarOccupation }),
+			DataReturn = lists:nth(1, ets:lookup(list_streets , Edge)),
+			{DataReturn , State }
+	end,
+
+	{ Id , Time , Distance } = traffic_models:get_speed_car(Data, getAttribute(NewState, digital_rails_capable)),
+
+	TotalLength = getAttribute( NewState , distance ) + Distance,
+	StateAfterMovement = setAttributes( NewState , [
 		{distance , TotalLength} , {car_position , Id} , {last_vertex, CurrentVertex}, {last_vertex_pid , Edge} , {path , [NextVertex | Path]}] ), 
 
 	% io:format("t=~p: ~p; ~p->~p ~n", [class_Actor:get_current_tick_offset(State), getAttribute(State, car_name), CurrentVertex, NextVertex]),
@@ -252,37 +281,19 @@ receive_signal_state( State , {Color, TicksUntilNextColor}, _TrafficLightPid ) -
 		red -> 
 			% io:format("[~p] red (green in ~p)\n", [TrafficLightPid, TicksUntilNextColor]),
 			% Act spontaneously when the traffic light is green again...
-			executeOneway( State , addSpontaneousTick , class_Actor:get_current_tick_offset( State ) + TicksUntilNextColor );
+			wooper:return_state( executeOneway( State , addSpontaneousTick , class_Actor:get_current_tick_offset( State ) + TicksUntilNextColor ) );
 		green -> 
 			% io:format("Traffic signal is green, continuing movement...\n"),
-			move_to_next_vertex(State)
+			wooper:return_state( move_to_next_vertex(State) )
 	end.
-
-get_parking_spot( State , IdNode , _ParkingPID ) ->
-	Node = element( 1 , IdNode ),
-	case Node of 
-	     nok ->
-		io:format( "nao disponivel");
-    	     _ ->
-		{ Path , City } = { getAttribute( State , path ), ets:lookup_element(options, city_pid, 2 ) },
-		CurrentVertice = lists:nth( 1 , Path ),
-		class_Actor:send_actor_message( City , { get_path, { CurrentVertice , Node } } , State )
-	end.
- 
-set_new_path( State , NewPath , _CityPID ) ->
-	Path = element( 1 , NewPath ), 
-	StateDict = setAttributes( State , [ { path , Path } , { park_status , finish } ] ),
-	Trips = getAttribute( StateDict , trips ), 
-	CurrentTrip = list_utils:get_element_at( Trips , 1 ),
-        request_position( StateDict , CurrentTrip , Path ).
 
 -spec onFirstDiasca( wooper:state(), pid() ) -> oneway_return().
 onFirstDiasca( State, _SendingActorPid ) ->
 	% TODO: Why this is needed?
 	StartTime = getAttribute( State , start_time ),
-    	FirstActionTime = class_Actor:get_current_tick_offset( State ) + StartTime,   	
+    	FirstActionTime = class_Actor:get_current_tick_offset( State ) + StartTime,
 	NewState = setAttribute( State , start_time , FirstActionTime ),
-	executeOneway( NewState , addSpontaneousTick , FirstActionTime ).
+	wooper:return_state( executeOneway( NewState , addSpontaneousTick , FirstActionTime ) ).
 
 %print_movement( PreviousState, NextState ) ->
 % 	CarId = getAttribute( PreviousState, car_name),

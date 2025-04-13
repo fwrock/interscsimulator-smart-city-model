@@ -2,29 +2,16 @@
 -module(class_CarManager).
 
 % Determines what are the mother classes of this class (if any):
--define( wooper_superclasses, [ class_Actor ] ).
+-define( superclasses, [ class_Actor ] ).
 
 % parameters taken by the constructor ('construct').
 -define( wooper_construct_parameters, ActorSettings, CarName , CarList ).
-
-% Declaring all variations of WOOPER-defined standard life-cycle operations:
-% (template pasted, just two replacements performed to update arities)
--define( wooper_construct_export, new/3, new_link/3,
-		 synchronous_new/3, synchronous_new_link/3,
-		 synchronous_timed_new/3, synchronous_timed_new_link/3,
-		 remote_new/4, remote_new_link/4, remote_synchronous_new/4,
-		 remote_synchronous_new_link/4, remote_synchronisable_new_link/4,
-		 remote_synchronous_timed_new/4, remote_synchronous_timed_new_link/4,
-		 construct/4, destruct/1 ).
-
-% Method declarations.
--define( wooper_method_export, actSpontaneous/1, onFirstDiasca/2 ).
 
 % Allows to define WOOPER base variables and methods for that class:
 -include("smart_city_test_types.hrl").
 
 % Allows to define WOOPER base variables and methods for that class:
--include("wooper.hrl").
+-include("sim_diasca_for_actors.hrl").
 
 % Creates a new agent that is a person that moves around the city
 -spec construct( wooper:state(), class_Actor:actor_settings(),
@@ -64,18 +51,22 @@ actSpontaneous( State ) ->
 		{ ok , List } -> init_cars( List ,  State )
 	end,
 
-	executeOneway( NewState , addSpontaneousTick , CurrentTick + 1 ).
+	wooper:return_state (executeOneway( NewState , addSpontaneousTick , CurrentTick + 1 ) ).
 	
 init_cars( [] , State ) -> State;
 init_cars( [ Car | Cars ] , State ) ->
 
-	{ CarName , ListTripsFinal , Type, Park , Mode , Count, DigitalRailsCapable } = Car,	
+	{ CarName , ListTripsFinal , Type, Park , Mode , Count, DigitalRailsCapable } = Car,
 
 	NewState = case Mode of
 		car ->
 			create_person_car( Count , State , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable );
 		walk ->	
 			create_person_car( Count , State , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable );
+		platoon ->
+			create_person_car( Count , State , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable );
+		bike ->
+			create_person_bike( Count , State , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable );
 		_ ->
 			create_person_public( Count , State , CarName , ListTripsFinal , Type , Mode, DigitalRailsCapable )
 	end,
@@ -107,7 +98,19 @@ create_person_public( Count , State , CarName , ListTripsFinal , Type , Mode, Di
 
 	create_person_public( Count - 1 , NewState , CarName , ListTripsFinal , Type , Mode, DigitalRailsCapable ).
 
+
+create_person_bike( 0 , State , _CarName , _ListTripsFinal , _Type , _Park , _Mode, _DigitalRailsCapable ) -> State;
+create_person_bike( Count , State , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable ) ->
+	CarFinalName = io_lib:format( "~s_~B", [ CarName , Count ] ),
+	StartTime = class_RandomManager:get_uniform_value( 1200 ),
+
+	NewState = class_Actor:create_actor( class_Bike,
+		[ CarFinalName , ListTripsFinal , StartTime , Type , Park , Mode, DigitalRailsCapable ] , State ),
+
+	create_person_bike( Count - 1 , NewState , CarName , ListTripsFinal , Type , Park , Mode, DigitalRailsCapable ).
+
+
 -spec onFirstDiasca( wooper:state(), pid() ) -> oneway_return().
 onFirstDiasca( State, _SendingActorPid ) ->
-    	FirstActionTime = class_Actor:get_current_tick_offset( State ) + 1,   	
-	executeOneway( State , addSpontaneousTick , FirstActionTime ).
+	FirstActionTime = class_Actor:get_current_tick_offset( State ) + 1,
+	wooper:return_state (executeOneway( State , addSpontaneousTick , FirstActionTime ) ).

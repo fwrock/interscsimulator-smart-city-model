@@ -2,30 +2,16 @@
 -module(class_Street).
 
 % Determines what are the mother classes of this class (if any):
--define( wooper_superclasses, [ class_Actor ] ).
+-define( superclasses, [ class_Actor ] ).
 
 % parameters taken by the constructor ('construct').
 -define( wooper_construct_parameters, ActorSettings , StreetName , ListEdges , LogName , Paths ).
-
-% Declaring all variations of WOOPER-defined standard life-cycle operations:
-% (template pasted, just two replacements performed to update arities)
--define( wooper_construct_export, new/5, new_link/5,
-		 synchronous_new/5, synchronous_new_link/5,
-		 synchronous_timed_new/5, synchronous_timed_new_link/5,
-		 remote_new/6, remote_new_link/6, remote_synchronous_new/6,
-		 remote_synchronous_new_link/6, remote_synchronisable_new_link/6,
-		 remote_synchronous_timed_new/6, remote_synchronous_timed_new_link/6,
-		 construct/6, destruct/1 ).
-
-% Method declarations.
--define( wooper_method_export, actSpontaneous/1, onFirstDiasca/2 ).
-
 
 % Allows to define WOOPER base variables and methods for that class:
 -include("smart_city_test_types.hrl").
 
 % Allows to define WOOPER base variables and methods for that class:
--include("wooper.hrl").
+-include("sim_diasca_for_actors.hrl").
 
 
 % Creates a new city graph
@@ -41,6 +27,11 @@ construct( State, ?wooper_construct_parameters ) ->
 		
 	case ets:info(list_streets_dr) of
 		undefined -> ets:new(list_streets_dr, [public, set, named_table]);
+                _ -> ok
+		end,
+		
+	case ets:info(drs_streets) of
+		undefined -> ets:new(drs_streets, [public, set, named_table]);
                 _ -> ok
         end,
 
@@ -97,25 +88,34 @@ iterate_list([]) -> ok;
 iterate_list([ Element | List ]) ->
 	
 	Vertices = element( 1, Element),
-	{ Id , Length , _ , Freespeed , Count, Lanes, {} } = element(2, Element),
+	{ Id , Length , _ , Freespeed , Count, Lanes, {}, IsCycleway, IsCyclelane, Inclination } = element(2, Element),
 
 	% CellSize = 7.5, % Cell size of 7.5m according to MATSim user guide
-	CellSize = 7.5,
+	CellSize = 5 * 7.5, % Previously capacity was given in "cars",
+                      % so we used CellSzie = 7.5.
+									    % Now the unit is a bike (1/5 of a car),
+											% so the capacity will tell "how many bikes fit in the link".
+										  % Obs: 7.5 is the car cell size.
 	CellSizeDR = 4.0,
-
+ 
+	ets:insert(drs_streets, { Vertices , 0 }),
+	
+	CountOnlyBikes = 0,
 	case Lanes == 1 of
 		true ->
 			StorageCapacity = math:ceil((Lanes) * Length / CellSize),
-			ets:insert(list_streets, {Vertices,  Id , Length , StorageCapacity , Freespeed , Count, Lanes, {} }),
+			LinkData = {Vertices,  Id , Length , StorageCapacity , Freespeed , Count, Lanes, {}, IsCycleway, IsCyclelane, Inclination, CountOnlyBikes },
+			ets:insert(list_streets, LinkData),
 	
 			StorageCapacityDR = math:ceil(1 * Length / CellSizeDR ),
-			ets:insert(list_streets_dr, {Vertices,  Id , Length , StorageCapacityDR , Freespeed , Count, Lanes, {} });
+			ets:insert(list_streets_dr, {Vertices,  Id , Length , StorageCapacityDR , Freespeed , Count, Lanes, {}, IsCycleway, IsCyclelane, Inclination, CountOnlyBikes });
 		false ->
 			StorageCapacity = math:ceil((Lanes - 1) * Length / CellSize),
-			ets:insert(list_streets, {Vertices,  Id , Length , StorageCapacity , Freespeed , Count, Lanes, {} }),
+			LinkData = {Vertices,  Id , Length , StorageCapacity , Freespeed , Count, Lanes, {}, IsCycleway, IsCyclelane, Inclination, CountOnlyBikes },
+			ets:insert(list_streets, LinkData),
 
 			StorageCapacityDR = math:ceil(1 * Length / CellSizeDR ),
-			ets:insert(list_streets_dr, {Vertices,  Id , Length , StorageCapacityDR , Freespeed , Count, Lanes, {} })
+			ets:insert(list_streets_dr, {Vertices,  Id , Length , StorageCapacityDR , Freespeed , Count, Lanes, {}, IsCycleway, IsCyclelane, Inclination, CountOnlyBikes })
 	end,
 
 	iterate_list( List ).
@@ -143,12 +143,12 @@ destruct( State ) ->
 
 	State.
 
--spec actSpontaneous( wooper:state() ) -> oneway_return().
+-spec actSpontaneous( wooper:state() ) -> const_oneway_return().
 actSpontaneous( State ) ->
 
-	State.
+	wooper:const_return().
 
--spec onFirstDiasca( wooper:state(), pid() ) -> oneway_return().
+-spec onFirstDiasca( wooper:state(), pid() ) -> const_oneway_return().
 onFirstDiasca( State, _SendingActorPid ) ->
 
-	?wooper_return_state_only( State ).
+	wooper:const_return().
