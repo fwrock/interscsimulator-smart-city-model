@@ -47,9 +47,7 @@ construct( State, ?wooper_construct_parameters ) ->
 		{ last_vertex , ok },
 		{ last_vertex_pid , ok },
 		{ previous_dr_name, nil },
-		{ in_platoon, false },
-		{ digital_rails_capable, DigitalRailsCapable},
-		{ occupation, 5 }] % one car occupies the space of 5 bikes 
+		{ digital_rails_capable, DigitalRailsCapable}] 
 	),
 
 	case Park of
@@ -106,6 +104,7 @@ request_position( State , _Trip , Path ) when Path == finish ->
 		false -> 
 			setAttributes( State , [ { trips , NewTrips } , { path, ok} ] )
 	end,
+
 	executeOneway( NewState , addSpontaneousTick , CurrentTickOffset + 1 );	
 
 
@@ -121,9 +120,8 @@ verify_park( State , Mode ) when Mode == walk ->
 
 
 verify_park( State , _Mode ) ->						
-	CarOccupation = getAttribute( State , occupation ),	
 	DecrementVertex = getAttribute( State , last_vertex_pid ),	
-	ets:update_counter( list_streets , DecrementVertex , { 6 , -CarOccupation }),
+	ets:update_counter( list_streets , DecrementVertex , { 6 , -1 }),
 	ParkStatus = getAttribute( State , park_status ),
 
 	case ParkStatus of
@@ -180,7 +178,7 @@ get_next_vertex( State, [ _CurrentVertex | _ ], _Mode) ->
 	Edge = list_to_atom(lists:concat([CurrentVertex, NextVertex])),
 
 	LinkData = lists:nth(1, ets:lookup(list_streets, Edge)),
-	{_, _, _, _, _, _, _Lanes, DigitalRailsInfo, _, _, _, _} = LinkData,
+	{_, _, _, _, _, _, _Lanes, DigitalRailsInfo} = LinkData,
 
 	_ChangingDR = is_changing_dr(State, DigitalRailsInfo),
 %	case ChangingDR of 
@@ -214,71 +212,31 @@ get_next_vertex( State, [ _CurrentVertex | _ ], _Mode) ->
 move_to_next_vertex( State ) ->
 	[ CurrentVertex | [ NextVertex | Path ] ] = getAttribute( State , path ),
 	Edge = list_to_atom(lists:concat([ CurrentVertex , NextVertex ])),
-
-	DecrementVertex = getAttribute( State , last_vertex_pid ),
-	Mode = getAttribute( State , mode ), 
-	case Mode of
-		platoon -> 
-	%		io:format( "platoon" ),
-			ets:update_counter(drs_streets, Edge , { 2 , 1 } ),
+	
+	Data = case getAttribute(State, digital_rails_capable) of
+		true -> 
+			DecrementVertex = getAttribute( State , last_vertex_pid ),
 			case DecrementVertex of
 				ok -> ok;
-				_ -> ets:update_counter( drs_streets, DecrementVertex , { 2 , -1 } )
-			end;
-	 	_ -> ok
-	end,
-
-	CarOccupation = getAttribute( State , occupation ),
-		
-	{ Data, NewState } = case getAttribute(State, digital_rails_capable) of
-		true ->  
-			NewNewNewState = case Mode of
-				platoon -> 
-					case DecrementVertex of
-						ok -> ok;
-						_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -CarOccupation })
-					end,	
-					ets:update_counter( list_streets_dr , Edge , { 6 , CarOccupation }),
-					State;
-				car ->
-					IsPlatoon = getAttribute( State, in_platoon ),
-					NewNewState = case IsPlatoon of
-						true ->	
-							State;				
-						false -> 
-							case DecrementVertex of
-								ok -> ok;
-								_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -CarOccupation })
-							end,	
-							StreetDR = ets:lookup( drs_streets, Edge ),
-							HasDR = lists:nth(1, StreetDR),
-							StatePlatoon = case element( 2 , HasDR ) > 0 of
-								true -> 
-									setAttribute( State , in_platoon , true );
-								false -> 
-									ets:update_counter( list_streets_dr , Edge , { 6 , CarOccupation }),
-									State
-							end,
-							StatePlatoon
-					end,	
-					NewNewState
-			end,
-			DataReturn = lists:nth(1, ets:lookup(list_streets_dr , Edge)),
-			{ DataReturn , NewNewNewState };
-		_ -> 
-			case DecrementVertex of
-				ok -> ok;
-				_ -> ets:update_counter( list_streets, DecrementVertex , { 6 , -CarOccupation })
+				_  -> ets:update_counter( list_streets_dr, DecrementVertex , { 6 , -1 })
 			end,	
-			ets:update_counter( list_streets , Edge , { 6 , CarOccupation }),
-			DataReturn = lists:nth(1, ets:lookup(list_streets , Edge)),
-			{DataReturn , State }
+			ets:update_counter( list_streets_dr , Edge , { 6 , 1 }),
+			lists:nth(1, ets:lookup(list_streets_dr , Edge));
+
+		_ -> 
+			DecrementVertex = getAttribute( State , last_vertex_pid ),
+			case DecrementVertex of
+				ok -> ok;
+				_ -> ets:update_counter( list_streets, DecrementVertex , { 6 , -1 })
+			end,	
+			ets:update_counter( list_streets , Edge , { 6 , 1 }),
+			lists:nth(1, ets:lookup(list_streets , Edge))
 	end,
+	
+	{ Id , Time , Distance } = traffic_models:get_speed_car(Data, getAttribute(State, digital_rails_capable)),
 
-	{ Id , Time , Distance } = traffic_models:get_speed_car(Data, getAttribute(NewState, digital_rails_capable)),
-
-	TotalLength = getAttribute( NewState , distance ) + Distance,
-	StateAfterMovement = setAttributes( NewState , [
+	TotalLength = getAttribute( State , distance ) + Distance,
+	StateAfterMovement = setAttributes( State , [
 		{distance , TotalLength} , {car_position , Id} , {last_vertex, CurrentVertex}, {last_vertex_pid , Edge} , {path , [NextVertex | Path]}] ), 
 
 	% io:format("t=~p: ~p; ~p->~p ~n", [class_Actor:get_current_tick_offset(State), getAttribute(State, car_name), CurrentVertex, NextVertex]),
